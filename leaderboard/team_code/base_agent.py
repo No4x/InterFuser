@@ -3,6 +3,7 @@ import os
 import datetime
 import pathlib
 import json
+
 import yaml
 from collections import deque
 
@@ -68,6 +69,14 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
         print(self.save_skip_frames)
         self.rgb_only = self.config.get("rgb_only", True)
 
+        self.frame_rate = 20  # Brame rate used by kinematic bicycle model for forecasting
+        self.extrapolation_seconds = 4.0  # Amount of seconds we look into the future to predict collisions at junctions
+        self.angle                = 0.0   # Angle to the next waypoint. Normalized in [-1, 1] corresponding to [-90, 90]
+        self.stop_sign_hazard     = False
+        self.traffic_light_hazard = False
+        self.walker_hazard        = [False for i in range(int(self.extrapolation_seconds * self.frame_rate))]
+        self.vehicle_hazard       = [False for i in range(int(self.extrapolation_seconds * self.frame_rate))]  #tf
+
         self.save_path = None
 
         if SAVE_PATH is not None:
@@ -114,6 +123,13 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 for sensor_type in ["rgb"]:
                     name = sensor_type + "_" + pos
                     (self.save_path / name).mkdir()
+
+            (self.save_path / "measurements_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "rgb_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "seg_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "deoth_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "topdown_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "label_raw_tf").mkdir(parents=True, exist_ok=True)
 
     def _init(self):
         self._command_planner = RoutePlanner(7.5, 25.0, 257)
@@ -328,6 +344,10 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
 
             bb_2d = {}
 
+            rgb_tf = []
+            seg_tf = []
+            depth_tf = []   #transfuser
+
             for pos in ["front", "left", "right"]:
                 seg_cam = "seg_" + pos
                 depth_cam = "depth_" + pos
@@ -342,6 +362,16 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 )
 
                 seg[pos] = _segmentation
+
+                rgb_cam = 'rgb_' + pos
+                rgb_tf.append(cv2.cvtColor(input_data[rgb_cam][1][:, :, :3], cv2.COLOR_BGR2RGB))
+                seg_tf.append(_segmentation)
+                depth_img = input_data[depth_cam][1][:, :, :3]
+                depth_tf.append(depth_img)
+
+            rgb_tf = np.concatenate(rgb_tf, axis=1)
+            seg_tf = np.concatenate(seg_tf, axis=1)
+            depth_tf = np.concatenate(depth_tf, axis=1)
 
             depth_front = cv2.cvtColor(
                 input_data["depth_front"][1][:, :, :3], cv2.COLOR_BGR2RGB
@@ -400,6 +430,9 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 "weather": weather,
                 "affordances": affordances,
                 "3d_bbs": bb_3d,
+                "rgb_tf":rgb_tf,
+                "seg_tf":seg_tf,
+                "depth_tf":depth_tf
             }
 
     def save(
@@ -455,9 +488,36 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             "affected_light_id": self.affected_light_id,
         }
 
+        data_tf = {
+            'x': pos[0],
+            'y': pos[1],
+            "theta": theta,
+            "speed": speed,
+            "target_speed": target_speed,
+            "x_command": far_node[0],
+            "y_command": far_node[1],
+            "command": near_command.value,
+            "waypoints": self._waypoint_planner.get_future_waypoints(8),
+            "steer": steer,
+            "throttle": throttle,
+            "brake": brake,
+            "junction": self.is_junction,
+            # 'vehicle_hazard':   self.vehicle_hazard,
+            # 'light_hazard':     self.traffic_light_hazard,
+            # 'walker_hazard':    self.walker_hazard,
+            # 'stop_sign_hazard': self.stop_sign_hazard,
+            # 'angle':            self.angle,
+            # 'ego_matrix': self._vehicle.get_transform().get_matrix()
+        }
+
         measurements_file = self.save_path / "measurements" / ("%04d.json" % frame)
         f = open(measurements_file, "w")
         json.dump(data, f, indent=4)
+        f.close()
+
+        measurements_file_tf = self.save_path / "measurements" / ("%04d.json" % frame)
+        f = open(measurements_file_tf, "w")
+        json.dump(data_tf, f, indent=4)
         f.close()
 
         actors_data_file = self.save_path / "actors_data" / ("%04d.json" % frame)
@@ -487,6 +547,8 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                         tick_data[name],
                         allow_pickle=True,
                     )
+        Image.fromarray(tick_data["rgb_tf"]).save(
+            self.save_path / name / ("%04d.jpg" % frame))
 
         if not self.rgb_only:
             Image.fromarray(tick_data["topdown"]).save(
@@ -507,6 +569,21 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 tick_data["3d_bbs"],
                 allow_pickle=True,
             )
+
+            Image.fromarray(tick_data["seg_tf"]).save(
+                self.save_path / name / ("%04d.jpg" % frame))
+
+            Image.fromarray(tick_data["depth_tf"]).save(
+                self.save_path / name / ("%04d.jpg" % frame))
+
+            Image.fromarray(tick_data["topdown_tf"]).save(
+                self.save_path / "topdown" / ("%04d.jpg" % frame)
+            )
+            self.save_labels(self.save_path / 'label_raw' / ('%04d.json' % frame), tick_data['cars'])
+    def save_labels(self, filename, result):
+        with open(filename, 'w') as f:
+            json.dump(result, f, indent=4)
+        return
 
     def _weather_to_dict(self, carla_weather):
         weather = {
@@ -1191,3 +1268,4 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             2.0 * np.tan(sensor["fov"] * np.pi / 360.0)
         )
         return calibration
+

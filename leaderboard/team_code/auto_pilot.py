@@ -224,7 +224,10 @@ class AutoPilot(MapAgent):
 
     def run_step(self, input_data, timestamp):
         if not self.initialized:
-            self._init()
+            if ('hd_map' in input_data.keys()):
+                self._init(input_data['hd_map'])
+            #self._init()
+
 
         data = self.tick(input_data)
         gps = self._get_position(data)
