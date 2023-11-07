@@ -8,7 +8,7 @@ from team_code.planner import RoutePlanner
 
 import pygame
 import torch
-from utils_tf.map_utils import MapImage, encode_npy_to_pil, PIXELS_PER_METER
+from utils_tf.map_utils import MapImage, PIXELS_PER_METER
 from utils_tf import lts_rendering
 import carla
 
@@ -108,7 +108,7 @@ class MapAgent(BaseAgent):
         result['topdown_tf'] = self.render_BEV()
         lidar = input_data['lidar']
         cars = self.get_bev_cars(lidar=lidar)
-
+        result['cars']=cars
         return result
 
     def render_BEV(self):
@@ -130,6 +130,8 @@ class MapAgent(BaseAgent):
         )
 
         self._actors = self._world.get_actors()
+        self.detection_radius = 30.0
+        self.light_radius = 15.0
         vehicles = self._actors.filter('*vehicle*')
         for vehicle in vehicles:
             if (vehicle.get_location().distance(self._vehicle.get_location()) < self.detection_radius):
@@ -176,7 +178,9 @@ class MapAgent(BaseAgent):
             ego_yaw_batched_torch = torch.tensor(ego_yaw_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
             pos_batched_torch = torch.tensor(pos_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
             yaw_batched_torch = torch.tensor(yaw_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
-            template_batched_torch = torch.tensor(template_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
+            #template_batched_torch = torch.tensor(template_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
+            template_batched_np = np.array(template_batched)
+            template_batched_torch = torch.tensor(template_batched_np, device='cuda', dtype=torch.float32).unsqueeze(1)
             channel_batched_torch = torch.tensor(channel_batched, device='cuda', dtype=torch.float32)
 
             self.renderer.render_agent_bv_batched(
@@ -223,7 +227,9 @@ class MapAgent(BaseAgent):
             ego_yaw_batched_torch = torch.tensor(ego_yaw_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
             pos_batched_torch = torch.tensor(pos_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
             yaw_batched_torch = torch.tensor(yaw_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
-            template_batched_torch = torch.tensor(template_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
+            #template_batched_torch = torch.tensor(template_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
+            template_batched_np = np.array(template_batched)
+            template_batched_torch = torch.tensor(template_batched_np, device='cuda', dtype=torch.float32).unsqueeze(1)
             channel_batched_torch = torch.tensor(channel_batched, device='cuda', dtype=torch.int)
 
             self.renderer.render_agent_bv_batched(

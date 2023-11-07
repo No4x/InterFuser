@@ -58,7 +58,8 @@ for route in routes:
 if not os.path.exists("batch_run"):
     os.mkdir("batch_run")
 
-for route in routes_list:
-    fw = open("batch_run/run_route_%s.sh" % route, "w")
-    for i in range(4):
+for i in range(4):
+    for route in routes_list:
+        fw = open("batch_run/run_route_%s.sh" % route, "w")
+
         fw.write("bash data_collection/bashs/weather-%d/%s.sh & \n" % (i, route))

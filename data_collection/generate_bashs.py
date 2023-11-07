@@ -53,15 +53,15 @@ routes[
 
 ip_ports = []
 
-for port in range(20000, 20028, 2):
-    ip_ports.append(("localhost", port, port + 500))
+for port in range(2000, 2040, 10):
+    ip_ports.append(("localhost", port, port + 2000))
 
 
 carla_seed = 2000
 traffic_seed = 2000
 
 configs = []
-for i in range(14):
+for i in range(4):
     configs.append("weather-%d.yaml" % i)
 
 
@@ -91,7 +91,7 @@ def generate_script(
     return base
 
 
-for i in range(14):
+for i in range(4):
     if not os.path.exists("bashs"):
         os.mkdir("bashs")
     os.mkdir("bashs/weather-%d" % i)

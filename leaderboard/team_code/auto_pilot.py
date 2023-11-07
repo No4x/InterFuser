@@ -103,8 +103,8 @@ class AutoPilot(MapAgent):
     def setup(self, path_to_conf_file):
         super().setup(path_to_conf_file)
 
-    def _init(self):
-        super()._init()
+    def _init(self,hd_map):
+        super()._init(hd_map)
 
         self._turn_controller = PIDController(K_P=1.25, K_I=0.75, K_D=0.3, n=40)
         self._speed_controller = PIDController(K_P=5.0, K_I=0.5, K_D=1.0, n=40)
@@ -198,6 +198,7 @@ class AutoPilot(MapAgent):
         # Steering.
         angle_unnorm = self._get_angle_to(pos, theta, target)
         angle = angle_unnorm / 90
+        self.angle=angle
 
         steer = self._turn_controller.step(angle)
         steer = np.clip(steer, -1.0, 1.0)

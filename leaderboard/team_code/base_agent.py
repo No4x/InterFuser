@@ -16,6 +16,7 @@ from team_code.planner import RoutePlanner
 import numpy as np
 from PIL import Image, ImageDraw
 
+from utils_tf.map_utils import encode_npy_to_pil
 
 SAVE_PATH = os.environ.get("SAVE_PATH", None)
 
@@ -127,7 +128,7 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             (self.save_path / "measurements_tf").mkdir(parents=True, exist_ok=True)
             (self.save_path / "rgb_tf").mkdir(parents=True, exist_ok=True)
             (self.save_path / "seg_tf").mkdir(parents=True, exist_ok=True)
-            (self.save_path / "deoth_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "depth_tf").mkdir(parents=True, exist_ok=True)
             (self.save_path / "topdown_tf").mkdir(parents=True, exist_ok=True)
             (self.save_path / "label_raw_tf").mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +142,11 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             self._sensor_data
         )
         self._sensors = self.sensor_interface._sensors_objects
+
+        self.stop_sign_hazard = False
+        self.traffic_light_hazard = False
+        self.walker_hazard = [False for i in range(int(self.extrapolation_seconds * self.frame_rate))]
+        self.vehicle_hazard = [False for i in range(int(self.extrapolation_seconds * self.frame_rate))]
 
     def _get_position(self, tick_data):
         gps = tick_data["gps"]
@@ -348,7 +354,7 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             seg_tf = []
             depth_tf = []   #transfuser
 
-            for pos in ["front", "left", "right"]:
+            for pos in ["left", "front", "right"]:
                 seg_cam = "seg_" + pos
                 depth_cam = "depth_" + pos
                 _segmentation = np.copy(input_data[seg_cam][1][:, :, 2])
@@ -488,6 +494,9 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             "affected_light_id": self.affected_light_id,
         }
 
+        self.traffic_light_hazard=True if len(self.is_red_light_present) > 0 else False
+        self.stop_sign_hazard=True if len(self.is_stop_sign_present) > 0 else False
+
         data_tf = {
             'x': pos[0],
             'y': pos[1],
@@ -502,12 +511,14 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             "throttle": throttle,
             "brake": brake,
             "junction": self.is_junction,
-            # 'vehicle_hazard':   self.vehicle_hazard,
-            # 'light_hazard':     self.traffic_light_hazard,
-            # 'walker_hazard':    self.walker_hazard,
-            # 'stop_sign_hazard': self.stop_sign_hazard,
-            # 'angle':            self.angle,
-            # 'ego_matrix': self._vehicle.get_transform().get_matrix()
+            'vehicle_hazard': self.vehicle_hazard,
+            'light_hazard': self.traffic_light_hazard,
+            'walker_hazard': self.walker_hazard,
+            'stop_sign_hazard': self.stop_sign_hazard,
+            'stop_sign_hazard_tf': self._affected_by_stop,
+            'angle': self.angle,
+            'ego_matrix': self._vehicle.get_transform().get_matrix()
+
         }
 
         measurements_file = self.save_path / "measurements" / ("%04d.json" % frame)
@@ -515,7 +526,7 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
         json.dump(data, f, indent=4)
         f.close()
 
-        measurements_file_tf = self.save_path / "measurements" / ("%04d.json" % frame)
+        measurements_file_tf = self.save_path / "measurements_tf" / ("%04d.json" % frame)
         f = open(measurements_file_tf, "w")
         json.dump(data_tf, f, indent=4)
         f.close()
@@ -547,8 +558,8 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                         tick_data[name],
                         allow_pickle=True,
                     )
-        Image.fromarray(tick_data["rgb_tf"]).save(
-            self.save_path / name / ("%04d.jpg" % frame))
+        img = cv2.cvtColor(tick_data['rgb_tf'],cv2.COLOR_RGB2BGR)
+        cv2.imwrite(str(self.save_path / 'rgb_tf' / ('%04d.png' % frame)), img)
 
         if not self.rgb_only:
             Image.fromarray(tick_data["topdown"]).save(
@@ -570,16 +581,20 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 allow_pickle=True,
             )
 
-            Image.fromarray(tick_data["seg_tf"]).save(
-                self.save_path / name / ("%04d.jpg" % frame))
+            seg_tf = tick_data['seg_tf']
+            cv2.imwrite(str(self.save_path / 'seg_tf' / ('%04d.png' % frame)), seg_tf)
 
-            Image.fromarray(tick_data["depth_tf"]).save(
-                self.save_path / name / ("%04d.jpg" % frame))
+            depth_tf = cv2.cvtColor(tick_data['depth_tf'], cv2.COLOR_RGB2BGR)
+            cv2.imwrite(str(self.save_path / 'depth_tf' / ('%04d.png' % frame)), depth_tf)
 
-            Image.fromarray(tick_data["topdown_tf"]).save(
-                self.save_path / "topdown" / ("%04d.jpg" % frame)
-            )
-            self.save_labels(self.save_path / 'label_raw' / ('%04d.json' % frame), tick_data['cars'])
+            img = encode_npy_to_pil(np.asarray(tick_data['topdown_tf'].squeeze().cpu()))
+            img_save = np.moveaxis(img, 0, 2)
+            cv2.imwrite(str(self.save_path / 'topdown_tf' / ('encoded_%04d.png' % frame)), img_save)
+            # Image.fromarray(tick_data["topdown_tf"]).save(
+            #     self.save_path / "topdown" / ("%04d.jpg" % frame)
+            # )
+            self.save_labels(self.save_path / 'label_raw_tf' / ('%04d.json' % frame), tick_data['cars'])
+
     def save_labels(self, filename, result):
         with open(filename, 'w') as f:
             json.dump(result, f, indent=4)
