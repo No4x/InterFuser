@@ -1345,6 +1345,7 @@ class AutoPilot(MapAgent):
 
 
                 i_stuck = i
+                print(i_stuck)
                 for id, traffic_participant in nearby_vehicles.items():
                     print(f"00000000000{traffic_participant},2,{nearby_vehicles}")
                     if self.render_bev == False and self.junction == False and i > number_of_future_frames_no_junction:
