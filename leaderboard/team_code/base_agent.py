@@ -70,13 +70,6 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
         print(self.save_skip_frames)
         self.rgb_only = self.config.get("rgb_only", True)
 
-        self.frame_rate = 20  # Brame rate used by kinematic bicycle model for forecasting
-        self.extrapolation_seconds = 4.0  # Amount of seconds we look into the future to predict collisions at junctions
-        self.angle                = 0.0   # Angle to the next waypoint. Normalized in [-1, 1] corresponding to [-90, 90]
-        self.stop_sign_hazard     = False
-        self.traffic_light_hazard = False
-        self.walker_hazard        = [False for i in range(int(self.extrapolation_seconds * self.frame_rate))]
-        self.vehicle_hazard       = [False for i in range(int(self.extrapolation_seconds * self.frame_rate))]  #tf
 
         self.save_path = None
 
@@ -145,8 +138,6 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
 
         self.stop_sign_hazard = False
         self.traffic_light_hazard = False
-        self.walker_hazard = [False for i in range(int(self.extrapolation_seconds * self.frame_rate))]
-        self.vehicle_hazard = [False for i in range(int(self.extrapolation_seconds * self.frame_rate))]
 
     def _get_position(self, tick_data):
         gps = tick_data["gps"]
@@ -494,8 +485,6 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             "affected_light_id": self.affected_light_id,
         }
 
-        self.traffic_light_hazard=True if len(self.is_red_light_present) > 0 else False
-        self.stop_sign_hazard=True if len(self.is_stop_sign_present) > 0 else False
 
         data_tf = {
             'x': pos[0],
@@ -510,13 +499,15 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             "steer": steer,
             "throttle": throttle,
             "brake": brake,
-            "junction": self.is_junction,
+            "brake_tf":self.brake_tf,
+            "junction": self.junction,
             'vehicle_hazard': self.vehicle_hazard,
             'light_hazard': self.traffic_light_hazard,
             'walker_hazard': self.walker_hazard,
             'stop_sign_hazard': self.stop_sign_hazard,
             'stop_sign_hazard_tf': self._affected_by_stop,
             'angle': self.angle,
+            'angle_tf':self.angle_tf,
             'ego_matrix': self._vehicle.get_transform().get_matrix()
 
         }

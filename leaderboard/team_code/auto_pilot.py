@@ -20,6 +20,10 @@ from team_code.pid_controller import PIDController
 from agents.navigation.local_planner import RoadOption
 from srunner.scenariomanager.carla_data_provider import CarlaDataProvider
 
+from collections import deque, defaultdict
+import statistics
+from utils_tf.nav_planner import PIDController, RoutePlanner, interpolate_trajectory
+
 
 WEATHERS = {
     "ClearNoon": carla.WeatherParameters.ClearNoon,
@@ -103,6 +107,58 @@ class AutoPilot(MapAgent):
     def setup(self, path_to_conf_file):
         super().setup(path_to_conf_file)
 
+        self.render_bev = False
+        self.ignore_stop_signs = False
+        self.target_speed = 4.0
+        self.frame_rate_tf = 20  # Brame rate used by kinematic bicycle model for forecasting
+        self.frame_rate_sim = 20  # CARLA framerate, used for visualizations
+        self.extrapolation_seconds = 4.0  # Amount of seconds we look into the future to predict collisions at junctions
+        self.angle                = 0.0   # Angle to the next waypoint. Normalized in [-1, 1] corresponding to [-90, 90]
+        self.stop_sign_hazard     = False
+        self.traffic_light_hazard = False
+        self.walker_hazard        = [False for i in range(int(self.extrapolation_seconds * self.frame_rate_tf))]
+        self.vehicle_hazard       = [False for i in range(int(self.extrapolation_seconds * self.frame_rate_tf))]
+        self.ignore_stop_sign     = False
+        self.cleared_stop_signs   = []                       #tf
+
+        self.center_bb_light_x = -2.0
+        self.center_bb_light_y = 0.0
+        self.center_bb_light_z = 0.0
+
+        self.extent_bb_light_x = 4.5
+        self.extent_bb_light_y = 1.5
+        self.extent_bb_light_z = 2.0
+
+        # Obstacle detection
+        self.extrapolation_seconds_no_junction = 1.0  # Amount of seconds we look into the future to predict collisions (>= 1 frame)
+        self.extrapolation_seconds = 4.0  # Amount of seconds we look into the future to predict collisions at junctions
+        self.waypoint_seconds = 4.0  # Amount of seconds we look into the future to store waypoint labels
+        self.detection_radius = 30.0  # Distance of obstacles (in meters) in which we will check for collisions
+        self.light_radius = 15.0  # Distance of traffic lights considered relevant (in meters)
+
+        # Speed buffer for detecting "stuck" vehicles
+        self.vehicle_speed_buffer = defaultdict(lambda: {"velocity": [], "throttle": [], "brake": []})
+        self.stuck_buffer_size = 30
+        self.stuck_vel_threshold = 0.1
+        self.stuck_throttle_threshold = 0.1
+        self.stuck_brake_threshold = 0.1
+
+        self.vehicle_model = EgoModel(dt=(1.0 / self.frame_rate_tf))
+        self.ego_model     = EgoModel(dt=(1.0 / self.frame_rate_tf))
+        self.ego_model_gps = EgoModel(dt=(1.0 / self.frame_rate_sim))
+
+        self._waypoint_planner_extrapolation = RoutePlanner(3.5, 50)
+        self._turn_controller_extrapolation = PIDController(K_P=1.25, K_I=0.75, K_D=0.3, n=40)
+        self._speed_controller_extrapolation = PIDController(K_P=5.0, K_I=0.5, K_D=1.0, n=40)
+        # Initialize controls
+        self.steer_tf = 0.0
+        self.throttle_tf = 0.0
+        self.brake_tf = 0.0
+        self.angle_search_range = 0
+        self.clip_delta = 0.25  # Max angular error for turn controller
+        self.clip_throttle = 0.75  # Max throttle (0-1)
+        self.junction = False
+
     def _init(self,hd_map):
         super()._init(hd_map)
 
@@ -147,6 +203,11 @@ class AutoPilot(MapAgent):
             crop_type=BirdViewCropType.FRONT_AND_REAR_AREA,
         )
 
+        self.world_map = carla.Map("RouteMap", hd_map[1]['opendrive'])
+        trajectory = [item[0].location for item in self._global_plan_world_coord]
+        self.dense_route, _ = interpolate_trajectory(self.world_map, trajectory)
+        self._waypoint_planner_extrapolation.set_route(self.dense_route, True)
+        self._waypoint_planner_extrapolation.save()
     def disturb_waypoints(self, route):
         updated_route = deque()
         np.random.seed(self.waypoint_disturb_seed)
@@ -210,6 +271,7 @@ class AutoPilot(MapAgent):
         self.should_slow = should_slow
         target_speed = 4.0 if should_slow else 6.5
         brake = self._should_brake(near_command)
+        self.brake_tf=self._get_brake()
         self.should_brake = brake
         target_speed = target_speed if not brake else 0.0
 
@@ -220,6 +282,11 @@ class AutoPilot(MapAgent):
         if brake:
             steer *= 0.5
             throttle = 0.0
+        pos_tf = self._get_position(tick_data['gps'][1][:2])
+        pos_tf = np.average(self.gps_buffer, axis=0)  # Denoised position
+        self._waypoint_planner_extrapolation.load()
+        self.waypoint_route_extrapolation = self._waypoint_planner_extrapolation.run_step(pos_tf)
+        self._waypoint_planner_extrapolation.save()  #tf
 
         return steer, throttle, brake, target_speed
 
@@ -261,6 +328,12 @@ class AutoPilot(MapAgent):
         self.birdview = BirdViewProducer.as_rgb(
             self.birdview_producer.produce(agent_vehicle=self._vehicle)
         )
+
+        self.stop_sign_hazard = True if len(self.is_stop_sign_present) > 0 else False
+        self.traffic_light_hazard = True if len(self.is_red_light_present) > 0 else False
+        self.junction = self.is_junction
+
+
         if self.step % self.save_skip_frames == 0 and self.save_path is not None:
             self.save(
                 near_node,
@@ -355,6 +428,9 @@ class AutoPilot(MapAgent):
         self.is_bike_present = [x.id for x in bike]
         self.is_red_light_present = [x.id for x in light]
         self.is_stop_sign_present = [x.id for x in stop_sign]
+
+
+
 
         return any(
             len(x) > 0
@@ -883,3 +959,491 @@ class AutoPilot(MapAgent):
             + math.cos(math.radians(angle)) * point.y
         )
         return carla.Vector3D(x_, y_, point.z)
+
+    def _get_steer_extrapolation(self, route, pos, theta, speed, restore=True):
+        if self._waypoint_planner_extrapolation.is_last: # end of route
+            angle = 0.0
+
+        if len(route) == 1:
+            target = route[0][0]
+            angle_unnorm = self._get_angle_to(pos, theta, target)
+            angle = angle_unnorm / 90
+        elif self.angle_search_range <= 2:
+            target = route[1][0]
+            angle_unnorm = self._get_angle_to(pos, theta, target)
+            angle = angle_unnorm / 90
+        else:
+            search_range = min([len(route), self.angle_search_range])
+            for i in range(1, search_range):
+                target = route[i][0]
+                angle_unnorm = self._get_angle_to(pos, theta, target)
+                angle_new = angle_unnorm / 90
+                if i==1:
+                    angle = angle_new
+                if np.abs(angle_new) < np.abs(angle):
+                    angle = angle_new
+
+        self.angle_tf = angle
+
+        if restore: self._turn_controller_extrapolation.load()
+        steer = self._turn_controller_extrapolation.step(angle)
+        if restore: self._turn_controller_extrapolation.save()
+
+        steer = np.clip(steer, -1.0, 1.0)
+        steer = round(steer, 3)
+
+        return steer
+
+    def _get_throttle_extrapolation(self, target_speed, speed, restore=True):
+        if self._waypoint_planner_extrapolation.is_last: # end of route
+            target_speed = 0.0
+
+        delta = np.clip(target_speed - speed, 0.0, self.clip_delta)
+
+        if restore: self._speed_controller_extrapolation.load()
+        throttle = self._speed_controller_extrapolation.step(delta)
+        if restore: self._speed_controller_extrapolation.save()
+
+        throttle = np.clip(throttle, 0.0, self.clip_throttle)
+
+        return throttle
+
+    def get_nearby_object(self, vehicle_position, actor_list, radius):
+        nearby_objects = []
+        for actor in actor_list:
+            trigger_box_global_pos = actor.get_transform().transform(actor.trigger_volume.location)
+            trigger_box_global_pos = carla.Location(x=trigger_box_global_pos.x, y=trigger_box_global_pos.y, z=trigger_box_global_pos.z)
+            if (trigger_box_global_pos.distance(vehicle_position) < radius):
+                nearby_objects.append(actor)
+        return nearby_objects
+
+    def dot_product(self, vector1, vector2):
+        return (vector1.x * vector2.x + vector1.y * vector2.y + vector1.z * vector2.z)
+
+    def cross_product(self, vector1, vector2):
+        return carla.Vector3D(x=vector1.y * vector2.z - vector1.z * vector2.y,
+                              y=vector1.z * vector2.x - vector1.x * vector2.z,
+                              z=vector1.x * vector2.y - vector1.y * vector2.x)
+
+    def get_separating_plane(self, rPos, plane, obb1, obb2):
+        ''' Checks if there is a seperating plane
+        rPos Vec3
+        plane Vec3
+        obb1  Bounding Box
+        obb2 Bounding Box
+        '''
+        return (abs(self.dot_product(rPos, plane)) > (
+                    abs(self.dot_product((obb1.rotation.get_forward_vector() * obb1.extent.x), plane)) +
+                    abs(self.dot_product((obb1.rotation.get_right_vector() * obb1.extent.y), plane)) +
+                    abs(self.dot_product((obb1.rotation.get_up_vector() * obb1.extent.z), plane)) +
+                    abs(self.dot_product((obb2.rotation.get_forward_vector() * obb2.extent.x), plane)) +
+                    abs(self.dot_product((obb2.rotation.get_right_vector() * obb2.extent.y), plane)) +
+                    abs(self.dot_product((obb2.rotation.get_up_vector() * obb2.extent.z), plane)))
+                )
+
+    def check_obb_intersection(self, obb1, obb2):
+        RPos = obb2.location - obb1.location
+        return not (self.get_separating_plane(RPos, obb1.rotation.get_forward_vector(), obb1, obb2) or
+                    self.get_separating_plane(RPos, obb1.rotation.get_right_vector(), obb1, obb2) or
+                    self.get_separating_plane(RPos, obb1.rotation.get_up_vector(), obb1, obb2) or
+                    self.get_separating_plane(RPos, obb2.rotation.get_forward_vector(), obb1, obb2) or
+                    self.get_separating_plane(RPos, obb2.rotation.get_right_vector(), obb1, obb2) or
+                    self.get_separating_plane(RPos, obb2.rotation.get_up_vector(), obb1, obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_forward_vector(),
+                                                                       obb2.rotation.get_forward_vector()), obb1,
+                                              obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_forward_vector(),
+                                                                       obb2.rotation.get_right_vector()), obb1, obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_forward_vector(),
+                                                                       obb2.rotation.get_up_vector()), obb1, obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_right_vector(),
+                                                                       obb2.rotation.get_forward_vector()), obb1,
+                                              obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_right_vector(),
+                                                                       obb2.rotation.get_right_vector()), obb1, obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_right_vector(),
+                                                                       obb2.rotation.get_up_vector()), obb1, obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_up_vector(),
+                                                                       obb2.rotation.get_forward_vector()), obb1,
+                                              obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_up_vector(),
+                                                                       obb2.rotation.get_right_vector()), obb1, obb2) or
+                    self.get_separating_plane(RPos, self.cross_product(obb1.rotation.get_up_vector(),
+                                                                       obb2.rotation.get_up_vector()), obb1, obb2))
+
+    def _get_brake(self, vehicle_hazard=None, light_hazard=None, walker_hazard=None, stop_sign_hazard=None):
+        actors = self._world.get_actors()
+        speed = self._get_forward_speed()
+
+        vehicle_location = self._vehicle.get_location()
+        vehicle_transform = self._vehicle.get_transform()
+
+        vehicles = actors.filter('*vehicle*')
+
+        # -----------------------------------------------------------
+        # Red light detection
+        # -----------------------------------------------------------
+        if light_hazard is None:
+            light_hazard = False
+            self._active_traffic_light = None
+            _traffic_lights = self.get_nearby_object(vehicle_location, actors.filter('*traffic_light*'),
+                                                     self.light_radius)
+
+            center_light_detector_bb = vehicle_transform.transform(
+                carla.Location(x=self.center_bb_light_x, y=self.center_bb_light_y, z=self.center_bb_light_z))
+            extent_light_detector_bb = carla.Vector3D(x=self.extent_bb_light_x, y=self.extent_bb_light_y,
+                                                      z=self.extent_bb_light_z)
+            light_detector_bb = carla.BoundingBox(center_light_detector_bb, extent_light_detector_bb)
+            light_detector_bb.rotation = vehicle_transform.rotation
+
+            for light in _traffic_lights:
+                size = 0.1  # size of the points and bounding boxes used for visualization
+                # box in which we will look for traffic light triggers.
+                center_bounding_box = light.get_transform().transform(light.trigger_volume.location)
+                center_bounding_box = carla.Location(center_bounding_box.x, center_bounding_box.y,
+                                                     center_bounding_box.z)
+                length_bounding_box = carla.Vector3D(light.trigger_volume.extent.x, light.trigger_volume.extent.y,
+                                                     light.trigger_volume.extent.z)
+                transform = carla.Transform(
+                    center_bounding_box)  # can only create a bounding box from a transform.location, not from a location
+                bounding_box = carla.BoundingBox(transform.location, length_bounding_box)
+
+                gloabl_rot = light.get_transform().rotation
+                bounding_box.rotation = carla.Rotation(pitch=light.trigger_volume.rotation.pitch + gloabl_rot.pitch,
+                                                       yaw=light.trigger_volume.rotation.yaw + gloabl_rot.yaw,
+                                                       roll=light.trigger_volume.rotation.roll + gloabl_rot.roll)
+
+                if (self.check_obb_intersection(light_detector_bb, bounding_box) == True):
+                    if ((light.state == carla.libcarla.TrafficLightState.Red)
+                            or (light.state == carla.libcarla.TrafficLightState.Yellow)):
+                        self._active_traffic_light = light
+                        light_hazard = True
+
+        # -----------------------------------------------------------
+        # Stop sign detection
+        # -----------------------------------------------------------
+        if stop_sign_hazard is None:
+            stop_sign_hazard = False
+            if not self.ignore_stop_signs:
+                stop_signs = self.get_nearby_object(vehicle_location, actors.filter('*stop*'), self.light_radius)
+                center_vehicle_stop_sign_detector_bb = vehicle_transform.transform(self._vehicle.bounding_box.location)
+                extent_vehicle_stop_sign_detector_bb = self._vehicle.bounding_box.extent
+                vehicle_stop_sign_detector_bb = carla.BoundingBox(center_vehicle_stop_sign_detector_bb,
+                                                                  extent_vehicle_stop_sign_detector_bb)
+                vehicle_stop_sign_detector_bb.rotation = vehicle_transform.rotation
+
+                for stop_sign in stop_signs:
+                    center_bb_stop_sign = stop_sign.get_transform().transform(stop_sign.trigger_volume.location)
+                    length_bb_stop_sign = carla.Vector3D(stop_sign.trigger_volume.extent.x,
+                                                         stop_sign.trigger_volume.extent.y,
+                                                         stop_sign.trigger_volume.extent.z)
+                    transform_stop_sign = carla.Transform(center_bb_stop_sign)
+                    bounding_box_stop_sign = carla.BoundingBox(transform_stop_sign.location, length_bb_stop_sign)
+                    rotation_stop_sign = stop_sign.get_transform().rotation
+                    bounding_box_stop_sign.rotation = carla.Rotation(
+                        pitch=stop_sign.trigger_volume.rotation.pitch + rotation_stop_sign.pitch,
+                        yaw=stop_sign.trigger_volume.rotation.yaw + rotation_stop_sign.yaw,
+                        roll=stop_sign.trigger_volume.rotation.roll + rotation_stop_sign.roll)
+
+                    if (self.check_obb_intersection(vehicle_stop_sign_detector_bb, bounding_box_stop_sign) == True):
+                        if (not (stop_sign.id in self.cleared_stop_signs)):
+                            if ((speed * 3.6) > 0.0):  # Conversion from m/s to km/h
+                                stop_sign_hazard = True
+                            else:
+                                self.cleared_stop_signs.append(stop_sign.id)
+
+                # reset past cleared stop signs
+                for cleared_stop_sign in self.cleared_stop_signs:
+                    remove_stop_sign = True
+                    for stop_sign in stop_signs:
+                        if (stop_sign.id == cleared_stop_sign):
+                            remove_stop_sign = False  # stop sign is still around us hence it might be active
+                    if (remove_stop_sign == True):
+                        self.cleared_stop_signs.remove(cleared_stop_sign)
+
+        # -----------------------------------------------------------
+        # Obstacle detection
+        # -----------------------------------------------------------
+        if vehicle_hazard is None or walker_hazard is None:
+            vehicle_hazard = False
+            self.vehicle_hazard = [False for i in range(int(self.extrapolation_seconds * self.frame_rate_tf))]
+            extrapolation_seconds = self.extrapolation_seconds  # amount of seconds we look into the future to predict collisions
+            detection_radius = self.detection_radius  # distance in which we check for collisions
+            number_of_future_frames = int(extrapolation_seconds * self.frame_rate_tf)
+            number_of_future_frames_no_junction = int(self.extrapolation_seconds_no_junction * self.frame_rate_tf)
+
+            # -----------------------------------------------------------
+            # Walker detection
+            # -----------------------------------------------------------
+            walkers = actors.filter('*walker*')
+            walker_hazard = False
+            self.walker_hazard = [False for i in range(int(self.extrapolation_seconds * self.frame_rate_tf))]
+            nearby_walkers = []
+            for walker in walkers:
+                if (walker.get_location().distance(vehicle_location) < detection_radius):
+                    walker_future_bbs = []
+                    walker_transform = walker.get_transform()
+                    walker_velocity = walker.get_velocity()
+                    walker_speed = self._get_forward_speed(transform=walker_transform,
+                                                           velocity=walker_velocity)  # In m/s
+                    walker_location = walker_transform.location
+                    walker_direction = walker.get_control().direction
+
+                    for i in range(number_of_future_frames):
+                        if self.render_bev == False and self.junction == False and i > number_of_future_frames_no_junction:
+                            break
+
+                        # NOTE for perf. optimization: Could also just add velocity.x instead might be a bit faster
+                        new_x = walker_location.x + walker_direction.x * walker_speed * (1.0 / self.frame_rate_tf)
+                        new_y = walker_location.y + walker_direction.y * walker_speed * (1.0 / self.frame_rate_tf)
+                        new_z = walker_location.z + walker_direction.z * walker_speed * (1.0 / self.frame_rate_tf)
+                        walker_location = carla.Location(new_x, new_y, new_z)
+
+                        transform = carla.Transform(walker_location)
+                        bounding_box = carla.BoundingBox(transform.location, walker.bounding_box.extent)
+                        bounding_box.rotation = carla.Rotation(
+                            pitch=walker.bounding_box.rotation.pitch + walker_transform.rotation.pitch,
+                            yaw=walker.bounding_box.rotation.yaw + walker_transform.rotation.yaw,
+                            roll=walker.bounding_box.rotation.roll + walker_transform.rotation.roll)
+
+                        walker_future_bbs.append(bounding_box)
+                    nearby_walkers.append(walker_future_bbs)
+
+            # -----------------------------------------------------------
+            # Vehicle detection
+            # -----------------------------------------------------------
+            nearby_vehicles = {}
+            tmp_near_vehicle_id = []
+            tmp_stucked_vehicle_id = []
+            for vehicle in vehicles:
+                if (vehicle.id == self._vehicle.id):
+                    continue
+                if (vehicle.get_location().distance(vehicle_location) < detection_radius):
+                    tmp_near_vehicle_id.append(vehicle.id)
+                    veh_future_bbs = []
+                    traffic_transform = vehicle.get_transform()
+                    traffic_control = vehicle.get_control()
+                    traffic_velocity = vehicle.get_velocity()
+                    traffic_speed = self._get_forward_speed(transform=traffic_transform,
+                                                            velocity=traffic_velocity)  # In m/s
+
+                    self.vehicle_speed_buffer[vehicle.id]["velocity"].append(traffic_speed)
+                    self.vehicle_speed_buffer[vehicle.id]["throttle"].append(traffic_control.throttle)
+                    self.vehicle_speed_buffer[vehicle.id]["brake"].append(traffic_control.brake)
+                    if len(self.vehicle_speed_buffer[vehicle.id]["velocity"]) > self.stuck_buffer_size:
+                        self.vehicle_speed_buffer[vehicle.id]["velocity"] = self.vehicle_speed_buffer[vehicle.id][
+                                                                                "velocity"][-self.stuck_buffer_size:]
+                        self.vehicle_speed_buffer[vehicle.id]["throttle"] = self.vehicle_speed_buffer[vehicle.id][
+                                                                                "throttle"][-self.stuck_buffer_size:]
+                        self.vehicle_speed_buffer[vehicle.id]["brake"] = self.vehicle_speed_buffer[vehicle.id]["brake"][
+                                                                         -self.stuck_buffer_size:]
+
+                    next_loc = np.array([traffic_transform.location.x, traffic_transform.location.y])
+                    action = np.array(
+                        np.stack([traffic_control.steer, traffic_control.throttle, traffic_control.brake], axis=-1))
+                    next_yaw = np.array([traffic_transform.rotation.yaw / 180.0 * np.pi])
+                    next_speed = np.array([traffic_speed])
+
+                    for i in range(number_of_future_frames):
+                        if self.render_bev == False and self.junction == False and i > number_of_future_frames_no_junction:
+                            break
+
+                        next_loc, next_yaw, next_speed = self.vehicle_model.forward(next_loc, next_yaw, next_speed,
+                                                                                    action)
+
+                        delta_yaws = next_yaw.item() * 180.0 / np.pi
+
+                        transform = carla.Transform(
+                            carla.Location(x=next_loc[0].item(), y=next_loc[1].item(), z=traffic_transform.location.z))
+                        bounding_box = carla.BoundingBox(transform.location, vehicle.bounding_box.extent)
+                        bounding_box.rotation = carla.Rotation(pitch=float(traffic_transform.rotation.pitch),
+                                                               yaw=float(delta_yaws),
+                                                               roll=float(traffic_transform.rotation.roll))
+
+                    if (statistics.mean(self.vehicle_speed_buffer[vehicle.id]["velocity"]) < self.stuck_vel_threshold
+                            and statistics.mean(
+                                self.vehicle_speed_buffer[vehicle.id]["throttle"]) > self.stuck_throttle_threshold
+                            and statistics.mean(
+                                self.vehicle_speed_buffer[vehicle.id]["brake"]) < self.stuck_brake_threshold):
+                        tmp_stucked_vehicle_id.append(vehicle.id)
+
+                    nearby_vehicles[vehicle.id] = veh_future_bbs
+
+            # delete old vehicles
+            to_delete = set(self.vehicle_speed_buffer.keys()).difference(tmp_near_vehicle_id)
+            for d in to_delete:
+                del self.vehicle_speed_buffer[d]
+            # -----------------------------------------------------------
+            # Intersection checks with ego vehicle
+            # -----------------------------------------------------------
+
+            next_loc_no_brake = np.array([vehicle_transform.location.x, vehicle_transform.location.y])
+            next_yaw_no_brake = np.array([vehicle_transform.rotation.yaw / 180.0 * np.pi])
+            next_speed_no_brake = np.array([speed])
+
+            # NOTE intentionally set ego vehicle to move at the target speed (we want to know if there is an intersection if we would not brake)
+            throttle_extrapolation = self._get_throttle_extrapolation(self.target_speed, speed)
+            action_no_brake = np.array(np.stack([self.steer_tf, throttle_extrapolation, 0.0], axis=-1))
+
+            back_only_vehicle_id = []
+            ego_future = []
+
+            for i in range(number_of_future_frames):
+                if self.render_bev == False and self.junction == False and i > number_of_future_frames_no_junction:
+                    alpha = 255
+                    color_value = 50
+                    break
+                else:
+                    alpha = 50
+                    color_value = 255
+
+                # calculate ego vehicle bounding box for the next timestep. We don't consider timestep 0 because it is from the past and has already happened.
+                next_loc_no_brake, next_yaw_no_brake, next_speed_no_brake = self.ego_model.forward(next_loc_no_brake,
+                                                                                                   next_yaw_no_brake,
+                                                                                                   next_speed_no_brake,
+                                                                                                   action_no_brake)
+                next_loc_no_brake_temp = np.array([-next_loc_no_brake[1], next_loc_no_brake[0]])
+                next_yaw_no_brake_temp = next_yaw_no_brake.item() + np.pi / 2  # in global coordinates
+
+                waypoint_route_extrapolation_temp = self._waypoint_planner_extrapolation.run_step(
+                    next_loc_no_brake_temp)
+                steer_extrapolation_temp = self._get_steer_extrapolation(waypoint_route_extrapolation_temp,
+                                                                         next_loc_no_brake_temp, next_yaw_no_brake_temp,
+                                                                         next_speed_no_brake, restore=False)
+                throttle_extrapolation_temp = self._get_throttle_extrapolation(self.target_speed, next_speed_no_brake,
+                                                                               restore=False)
+                brake_extrapolation_temp = 1.0 if self._waypoint_planner_extrapolation.is_last else 0.0
+                action_no_brake = np.array(
+                    np.stack([steer_extrapolation_temp, float(throttle_extrapolation_temp), brake_extrapolation_temp],
+                             axis=-1))
+
+                delta_yaws_no_brake = next_yaw_no_brake.item() * 180.0 / np.pi
+                cosine = np.cos(next_yaw_no_brake.item())
+                sine = np.sin(next_yaw_no_brake.item())
+
+                extent = self._vehicle.bounding_box.extent
+                extent_org = self._vehicle.bounding_box.extent
+                extent.x = extent.x / 2.
+
+                # front half
+                transform = carla.Transform(carla.Location(x=next_loc_no_brake[0].item() + extent.x * cosine,
+                                                           y=next_loc_no_brake[1].item() + extent.y * sine,
+                                                           z=vehicle_transform.location.z))
+                bounding_box = carla.BoundingBox(transform.location, extent)
+                bounding_box.rotation = carla.Rotation(pitch=float(vehicle_transform.rotation.pitch),
+                                                       yaw=float(delta_yaws_no_brake),
+                                                       roll=float(vehicle_transform.rotation.roll))
+
+                # back half
+                transform_back = carla.Transform(carla.Location(x=next_loc_no_brake[0].item() - extent.x * cosine,
+                                                                y=next_loc_no_brake[1].item() - extent.y * sine,
+                                                                z=vehicle_transform.location.z))
+                bounding_box_back = carla.BoundingBox(transform_back.location, extent)
+                bounding_box_back.rotation = carla.Rotation(pitch=float(vehicle_transform.rotation.pitch),
+                                                            yaw=float(delta_yaws_no_brake),
+                                                            roll=float(vehicle_transform.rotation.roll))
+
+
+                i_stuck = i
+                for id, traffic_participant in nearby_vehicles.items():
+                    print(f"00000000000{traffic_participant},2,{nearby_vehicles}")
+                    if self.render_bev == False and self.junction == False and i > number_of_future_frames_no_junction:
+                        break
+                    if id in tmp_stucked_vehicle_id:
+                        i_stuck = 0
+                    back_intersect = (
+                                self.check_obb_intersection(bounding_box_back, traffic_participant[i_stuck]) == True)
+                    front_intersect = (self.check_obb_intersection(bounding_box, traffic_participant[i_stuck]) == True)
+                    if id in back_only_vehicle_id:
+                        back_only_vehicle_id.remove(id)
+                        if back_intersect:
+                            back_only_vehicle_id.append(id)
+                        continue
+                    if back_intersect and not front_intersect:
+                        back_only_vehicle_id.append(id)
+                    if front_intersect:
+                        color = carla.Color(color_value, 0, 0, alpha)
+                        if self.junction == True or i <= number_of_future_frames_no_junction:
+                            vehicle_hazard = True
+                        self.vehicle_hazard[i] = True
+
+                for walker in nearby_walkers:
+                    if self.render_bev == False and self.junction == False and i > number_of_future_frames_no_junction:
+                        break
+                    if (self.check_obb_intersection(bounding_box, walker[i]) == True):
+                        color = carla.Color(color_value, 0, 0, alpha)
+                        if self.junction == True or i <= number_of_future_frames_no_junction:
+                            walker_hazard = True
+                        self.walker_hazard[i] = True
+
+            bremsweg = ((speed * 3.6) / 10.0) ** 2 / 2.0  # Bremsweg formula for emergency break
+            safety_x = np.clip(bremsweg + 1.0, a_min=2.0, a_max=4.0)  # plus one meter is the car.
+
+            center_safety_box = vehicle_transform.transform(carla.Location(x=safety_x, y=0.0, z=0.0))
+            bounding_box = carla.BoundingBox(center_safety_box, self._vehicle.bounding_box.extent)
+            bounding_box.rotation = vehicle_transform.rotation
+
+            for _, traffic_participant in nearby_vehicles.items():
+                if (self.check_obb_intersection(bounding_box, traffic_participant[
+                    0]) == True):  # check the first BB of the traffic participant. We don't extrapolate into the future here.
+                    color = carla.Color(255, 0, 0, 255)
+                    vehicle_hazard = True
+                    self.vehicle_hazard[0] = True
+
+            for walker in nearby_walkers:
+                if (self.check_obb_intersection(bounding_box, walker[
+                    0]) == True):  # check the first BB of the traffic participant. We don't extrapolate into the future here.
+                    color = carla.Color(255, 0, 0, 255)
+                    walker_hazard = True
+                    self.walker_hazard[0] = True
+
+            self.future_states = {'walker': nearby_walkers, 'vehicle': nearby_vehicles}
+
+        else:
+            self.vehicle_hazard = vehicle_hazard
+            self.walker_hazard = walker_hazard
+
+        self.stop_sign_hazard = stop_sign_hazard
+        self.traffic_light_hazard = light_hazard
+
+        return (vehicle_hazard or light_hazard or walker_hazard or stop_sign_hazard)
+
+class EgoModel():
+    def __init__(self, dt=1. / 4):
+        self.dt = dt
+
+        # Kinematic bicycle model. Numbers are the tuned parameters from World on Rails
+        self.front_wb = -0.090769015
+        self.rear_wb = 1.4178275
+
+        self.steer_gain = 0.36848336
+        self.brake_accel = -4.952399
+        self.throt_accel = 0.5633837
+
+    def forward(self, locs, yaws, spds, acts):
+        # Kinematic bicycle model. Numbers are the tuned parameters from World on Rails
+        steer = acts[..., 0:1].item()
+        throt = acts[..., 1:2].item()
+        brake = acts[..., 2:3].astype(np.uint8)
+
+        if (brake):
+            accel = self.brake_accel
+        else:
+            accel = self.throt_accel * throt
+
+        wheel = self.steer_gain * steer
+
+        beta = math.atan(self.rear_wb / (self.front_wb + self.rear_wb) * math.tan(wheel))
+        yaws = yaws.item()
+        spds = spds.item()
+        next_locs_0 = locs[0].item() + spds * math.cos(yaws + beta) * self.dt
+        next_locs_1 = locs[1].item() + spds * math.sin(yaws + beta) * self.dt
+        next_yaws = yaws + spds / self.rear_wb * math.sin(beta) * self.dt
+        next_spds = spds + accel * self.dt
+        next_spds = next_spds * (next_spds > 0.0)  # Fast ReLU
+
+        next_locs = np.array([next_locs_0, next_locs_1])
+        next_yaws = np.array(next_yaws)
+        next_spds = np.array(next_spds)
+
+        return next_locs, next_yaws, next_spds
