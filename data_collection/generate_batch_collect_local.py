@@ -1,5 +1,4 @@
 import os
-import random
 
 routes = {}
 routes[
@@ -51,64 +50,15 @@ routes[
     "additional_routes/routes_town06_long.xml"
 ] = "scenarios/town06_all_scenarios.json"
 
-ip_ports = []
 
-for port in range(2000, 2040, 10):
-    ip_ports.append(("localhost", port, port + 2000))
+towns=['town01','town02','town03','town04','town05','town06','town07','town10']
 
+if not os.path.exists("batch_run_local"):
+    os.mkdir("batch_run_local")
 
-carla_seed = 2000
-traffic_seed = 2000
-
-configs = []
-for i in range(14):
-    configs.append("weather-%d.yaml" % i)
-
-
-def generate_script(
-    ip, port, tm_port, route, scenario, carla_seed, traffic_seed, config_path
-):
-    lines = []
-    lines.append("export HOST=%s\n" % ip)
-    lines.append("export PORT=%d\n" % port)
-    lines.append("export TM_PORT=%d\n" % tm_port)
-    lines.append("export ROUTES=${LEADERBOARD_ROOT}/data/%s\n" % route)
-    lines.append("export SCENARIOS=${LEADERBOARD_ROOT}/data/%s\n" % scenario)
-    lines.append("export CARLA_SEED=%d\n" % port)
-    lines.append("export TRAFFIC_SEED=%d\n" % port)
-    lines.append("export TEAM_CONFIG=${YAML_ROOT}/%s\n" % config_path)
-    lines.append("export SAVE_PATH=${DATA_ROOT}/%s/data\n" % config_path.split(".")[0])
-    lines.append(
-        "export CHECKPOINT_ENDPOINT=${DATA_ROOT}/%s/results/%s.json\n"
-        % (config_path.split(".")[0], route.split("/")[1].split(".")[0])
-    )
-    lines.append("\n")
-    base = open("base_script.sh").readlines()
-
-    for line in lines:
-        base.insert(13, line)
-
-    return base
-
-
-for i in range(4):
-    if not os.path.exists("bashs"):
-        os.mkdir("bashs")
-    os.mkdir("bashs/weather-%d" % i)
-    for route in routes:
-        ip, port, tm_port = ip_ports[i]
-        script = generate_script(
-            ip,
-            port,
-            tm_port,
-            route,
-            routes[route],
-            carla_seed,
-            traffic_seed,
-            configs[i],
-        )
-        fw = open(
-            "bashs/weather-%d/%s.sh" % (i, route.split("/")[1].split(".")[0]), "w"
-        )
-        for line in script:
-            fw.write(line)
+for town in towns:
+    fw = open("batch_run_local/run_%s.sh" % town, "w")
+    files=[]
+    files=os.listdir("bashs_local/%s" % town)
+    for file in files:
+        fw.write("bash data_collection/bashs_local/%s/%s \n" % (town,file))

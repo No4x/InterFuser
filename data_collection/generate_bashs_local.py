@@ -51,7 +51,10 @@ routes[
     "additional_routes/routes_town06_long.xml"
 ] = "scenarios/town06_all_scenarios.json"
 
+towns=['town01','town02','town03','town04','town05','town06','town07','town10']
 ip_ports = []
+
+towns=['town01','town02','town03','town04','town05','town06','town07','town10']
 
 for port in range(2000, 2040, 10):
     ip_ports.append(("localhost", port, port + 2000))
@@ -66,7 +69,7 @@ for i in range(14):
 
 
 def generate_script(
-    ip, port, tm_port, route, scenario, carla_seed, traffic_seed, config_path
+    ip, port, tm_port, route, scenario, carla_seed, traffic_seed, config_path,town
 ):
     lines = []
     lines.append("export HOST=%s\n" % ip)
@@ -77,10 +80,10 @@ def generate_script(
     lines.append("export CARLA_SEED=%d\n" % port)
     lines.append("export TRAFFIC_SEED=%d\n" % port)
     lines.append("export TEAM_CONFIG=${YAML_ROOT}/%s\n" % config_path)
-    lines.append("export SAVE_PATH=${DATA_ROOT}/%s/data\n" % config_path.split(".")[0])
+    lines.append("export SAVE_PATH=${DATA_ROOT}/%s/data\n" % town)
     lines.append(
-        "export CHECKPOINT_ENDPOINT=${DATA_ROOT}/%s/results/%s.json\n"
-        % (config_path.split(".")[0], route.split("/")[1].split(".")[0])
+        "export CHECKPOINT_ENDPOINT=${DATA_ROOT}/%s/results/%s_%s.json\n"
+        % (town, route.split("/")[1].split(".")[0],config_path.split('.')[0])
     )
     lines.append("\n")
     base = open("base_script.sh").readlines()
@@ -90,25 +93,30 @@ def generate_script(
 
     return base
 
+for i,town in enumerate(towns):
+    if not os.path.exists("bashs_local"):
+        os.mkdir("bashs_local")
+    os.makedirs(f"bashs_local/{town}",exist_ok=True)
 
-for i in range(4):
-    if not os.path.exists("bashs"):
-        os.mkdir("bashs")
-    os.mkdir("bashs/weather-%d" % i)
+    i %= 4
+    ip, port, tm_port = ip_ports[i]
     for route in routes:
-        ip, port, tm_port = ip_ports[i]
-        script = generate_script(
-            ip,
-            port,
-            tm_port,
-            route,
-            routes[route],
-            carla_seed,
-            traffic_seed,
-            configs[i],
-        )
-        fw = open(
-            "bashs/weather-%d/%s.sh" % (i, route.split("/")[1].split(".")[0]), "w"
-        )
-        for line in script:
-            fw.write(line)
+        if town in route:
+            for j in range(8):
+                script = generate_script(
+                    ip,
+                    port,
+                    tm_port,
+                    route,
+                    routes[route],
+                    carla_seed,
+                    traffic_seed,
+                    configs[j],
+                    town
+                )
+
+                fw = open(
+                    f"bashs_local/{town}/{route.split('/')[1].split('.')[0]}_{configs[j].split('.')[0]}.sh", "w"
+                )
+                for line in script:
+                    fw.write(line)

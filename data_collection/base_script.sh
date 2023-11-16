@@ -1,5 +1,5 @@
 #!/bin/bash
-export DATA_ROOT=dataset
+export DATA_ROOT=dataset_local
 export YAML_ROOT=data_collection/yamls
 export CARLA_ROOT=carla
 export CARLA_SERVER=${CARLA_ROOT}/CarlaUE4.sh

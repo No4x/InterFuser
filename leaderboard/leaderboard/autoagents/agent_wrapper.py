@@ -235,9 +235,9 @@ class AgentWrapper(object):
                 sensor_ids.append(sensor_id)
 
             # Check if the sensor is valid
-            if agent_track == Track.SENSORS:
-                if sensor['type'].startswith('sensor.opendrive_map'):
-                    raise SensorConfigurationInvalid("Illegal sensor used for Track [{}]!".format(agent_track))
+            # if agent_track == Track.SENSORS:
+            #     if sensor['type'].startswith('sensor.opendrive_map'):
+            #         raise SensorConfigurationInvalid("Illegal sensor used for Track [{}]!".format(agent_track))
 
             # Check the sensors validity
             if sensor['type'] not in AgentWrapper.allowed_sensors:

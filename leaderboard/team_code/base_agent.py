@@ -15,6 +15,7 @@ from team_code.planner import RoutePlanner
 import numpy as np
 from PIL import Image, ImageDraw
 
+from utils_tf.map_utils import encode_npy_to_pil
 
 SAVE_PATH = os.environ.get("SAVE_PATH", None)
 
@@ -115,6 +116,14 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                     name = sensor_type + "_" + pos
                     (self.save_path / name).mkdir()
 
+            (self.save_path / "measurements_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "lidar_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "rgb_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "seg_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "depth_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "topdown_tf").mkdir(parents=True, exist_ok=True)
+            (self.save_path / "label_raw_tf").mkdir(parents=True, exist_ok=True)
+
     def _init(self):
         self._command_planner = RoutePlanner(7.5, 25.0, 257)
         self._command_planner.set_route(self._global_plan, True)
@@ -125,6 +134,9 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             self._sensor_data
         )
         self._sensors = self.sensor_interface._sensors_objects
+
+        self.stop_sign_hazard = False
+        self.traffic_light_hazard = False
 
     def _get_position(self, tick_data):
         gps = tick_data["gps"]
@@ -328,7 +340,11 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
 
             bb_2d = {}
 
-            for pos in ["front", "left", "right"]:
+            rgb_tf = []
+            seg_tf = []
+            depth_tf = []   #transfuser
+
+            for pos in ["left", "front", "right"]:
                 seg_cam = "seg_" + pos
                 depth_cam = "depth_" + pos
                 _segmentation = np.copy(input_data[seg_cam][1][:, :, 2])
@@ -342,6 +358,16 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 )
 
                 seg[pos] = _segmentation
+
+                rgb_cam = 'rgb_' + pos
+                rgb_tf.append(cv2.cvtColor(input_data[rgb_cam][1][:, :, :3], cv2.COLOR_BGR2RGB))
+                seg_tf.append(_segmentation)
+                depth_img = input_data[depth_cam][1][:, :, :3]
+                depth_tf.append(depth_img)
+
+            rgb_tf = np.concatenate(rgb_tf, axis=1)
+            seg_tf = np.concatenate(seg_tf, axis=1)
+            depth_tf = np.concatenate(depth_tf, axis=1)
 
             depth_front = cv2.cvtColor(
                 input_data["depth_front"][1][:, :, :3], cv2.COLOR_BGR2RGB
@@ -394,12 +420,16 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 "depth_right": depth_right,
                 "2d_bbs_right": bb_2d["right"],
                 "lidar": input_data["lidar"][1],
+                "lidar_tf": input_data["lidar"],
                 "gps": gps,
                 "speed": speed,
                 "compass": compass,
                 "weather": weather,
                 "affordances": affordances,
                 "3d_bbs": bb_3d,
+                "rgb_tf":rgb_tf,
+                "seg_tf":seg_tf,
+                "depth_tf":depth_tf
             }
 
     def save(
@@ -454,10 +484,50 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
             "future_waypoints": self._waypoint_planner.get_future_waypoints(50),
             "affected_light_id": self.affected_light_id,
         }
+        waypoints_tf = []
+        for i, box in enumerate(self.future_states['ego']):
+            if (i + 1) % (self.frame_rate_tf / 2) == 0:
+                box_x = -box.location.y
+                box_y = box.location.x
+                box_theta = box.rotation.yaw * np.pi / 180.0 + np.pi / 2
+                if box_theta < 0:
+                    box_theta += 2 * np.pi
+                waypoints_tf.append((box_x, box_y, box_theta))
+
+        data_tf = {
+            'x': pos[0],
+            'y': pos[1],
+            "theta": theta,
+            "speed": speed,
+            "target_speed": target_speed,
+            "x_command": far_node[0],
+            "y_command": far_node[1],
+            "command": near_command.value,
+            "waypoints_it": self._waypoint_planner.get_future_waypoints(8),
+            "waypoints": waypoints_tf,
+            "steer": steer,
+            "throttle": throttle,
+            "brake": brake,
+            "brake_tf":self.brake_tf,
+            "junction": self.junction,
+            'vehicle_hazard': self.vehicle_hazard,
+            'light_hazard': self.traffic_light_hazard,
+            'walker_hazard': self.walker_hazard,
+            'stop_sign_hazard': self.stop_sign_hazard,
+            'stop_sign_hazard_tf': self._affected_by_stop,
+            'angle': self.angle,
+            'ego_matrix': self._vehicle.get_transform().get_matrix()
+
+        }
 
         measurements_file = self.save_path / "measurements" / ("%04d.json" % frame)
         f = open(measurements_file, "w")
         json.dump(data, f, indent=4)
+        f.close()
+
+        measurements_file_tf = self.save_path / "measurements_tf" / ("%04d.json" % frame)
+        f = open(measurements_file_tf, "w")
+        json.dump(data_tf, f, indent=4)
         f.close()
 
         actors_data_file = self.save_path / "actors_data" / ("%04d.json" % frame)
@@ -487,6 +557,8 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                         tick_data[name],
                         allow_pickle=True,
                     )
+        img = cv2.cvtColor(tick_data['rgb_tf'],cv2.COLOR_RGB2BGR)
+        cv2.imwrite(str(self.save_path / 'rgb_tf' / ('%04d.png' % frame)), img)
 
         if not self.rgb_only:
             Image.fromarray(tick_data["topdown"]).save(
@@ -503,10 +575,34 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 allow_pickle=True,
             )
             np.save(
+                self.save_path / "lidar_tf" / ("%04d.npy" % frame),
+                tick_data["lidar_tf"],
+                allow_pickle=True,
+            )
+            np.save(
                 self.save_path / "3d_bbs" / ("%04d.npy" % frame),
                 tick_data["3d_bbs"],
                 allow_pickle=True,
             )
+
+            seg_tf = tick_data['seg_tf']
+            cv2.imwrite(str(self.save_path / 'seg_tf' / ('%04d.png' % frame)), seg_tf)
+
+            depth_tf = cv2.cvtColor(tick_data['depth_tf'], cv2.COLOR_RGB2BGR)
+            cv2.imwrite(str(self.save_path / 'depth_tf' / ('%04d.png' % frame)), depth_tf)
+
+            img = encode_npy_to_pil(np.asarray(tick_data['topdown_tf'].squeeze().cpu()))
+            img_save = np.moveaxis(img, 0, 2)
+            cv2.imwrite(str(self.save_path / 'topdown_tf' / ('encoded_%04d.png' % frame)), img_save)
+            # Image.fromarray(tick_data["topdown_tf"]).save(
+            #     self.save_path / "topdown" / ("%04d.jpg" % frame)
+            # )
+            self.save_labels(self.save_path / 'label_raw_tf' / ('%04d.json' % frame), tick_data['cars'])
+
+    def save_labels(self, filename, result):
+        with open(filename, 'w') as f:
+            json.dump(result, f, indent=4)
+        return
 
     def _weather_to_dict(self, carla_weather):
         weather = {
