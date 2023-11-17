@@ -103,11 +103,17 @@ class MapAgent(BaseAgent):
         topdown = draw_traffic_lights(topdown, self._vehicle, self._traffic_lights)
         topdown = draw_stop_signs(topdown, self._vehicle, self._stop_signs)
 
+        keys=[]
+        for key in input_data:
+            keys.append(key)
+        print(key)
+        lidar = input_data['lidar']
+
+        cars = self.get_bev_cars(lidar=lidar)
         result = super().tick(input_data)
         result["topdown"] = topdown
         result['topdown_tf'] = self.render_BEV()
-        lidar = input_data['lidar']
-        cars = self.get_bev_cars(lidar=lidar)
+
         result['cars']=cars
         return result
 
