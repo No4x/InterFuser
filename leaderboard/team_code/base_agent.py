@@ -46,7 +46,7 @@ WEATHERS_IDS = list(WEATHERS)
 
 
 class BaseAgent(autonomous_agent.AutonomousAgent):
-    def setup(self, path_to_conf_file):
+    def setup(self, path_to_conf_file,route_index=None):
         self.track = autonomous_agent.Track.SENSORS
         if path_to_conf_file.endswith("yaml"):
             self.config = yaml.load(open(path_to_conf_file, "r"), Loader=yaml.FullLoader)
@@ -67,6 +67,7 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
         self.save_skip_frames = self.config.get("save_skip_frames", 10)
         print(self.config)
         print(self.save_skip_frames)
+        self.route_index = route_index
         self.rgb_only = self.config.get("rgb_only", True)
 
         self.save_path = None
@@ -84,6 +85,7 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                 )
             else:
                 weather = WEATHERS[WEATHERS_IDS[self.weather_id]]
+                string += f'route{self.route_index}_'
                 string += "w%d_" % self.weather_id + "_".join(
                     map(
                         lambda x: "%02d" % x,
@@ -91,6 +93,7 @@ class BaseAgent(autonomous_agent.AutonomousAgent):
                     )
                 )
             print(string)
+
             self.save_path = pathlib.Path(os.environ["SAVE_PATH"]) / string
             self.save_path.mkdir(parents=True, exist_ok=False)
 

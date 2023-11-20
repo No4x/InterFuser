@@ -266,8 +266,7 @@ class LeaderboardEvaluator(object):
         try:
             self._agent_watchdog.start()
             agent_class_name = getattr(self.module_agent, 'get_entry_point')()
-            self.agent_instance = getattr(self.module_agent, agent_class_name)(args.agent_config)
-            print(f'==========leaderboard name{config.name} index:{config.index}, config:{config}')
+            self.agent_instance = getattr(self.module_agent, agent_class_name)(args.agent_config,config.index)
             config.agent = self.agent_instance
 
             # Check and store the sensors

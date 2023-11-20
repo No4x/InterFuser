@@ -104,8 +104,8 @@ class AutoPilot(MapAgent):
     SPEED_THRESHOLD = 0.1
     WAYPOINT_STEP = 1.0  # meters
 
-    def setup(self, path_to_conf_file):
-        super().setup(path_to_conf_file)
+    def setup(self, path_to_conf_file,route_index=None):
+        super().setup(path_to_conf_file,route_index)
 
         self.render_bev = False
         self.ignore_stop_signs = False

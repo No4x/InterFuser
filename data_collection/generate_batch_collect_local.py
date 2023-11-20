@@ -51,14 +51,18 @@ routes[
 ] = "scenarios/town06_all_scenarios.json"
 
 
-towns=['town01','town02','town03','town04','town05','town06','town07','town10']
+routes_list = []
+for route in routes:
+    routes_list.append(route.split("/")[1].split(".")[0])
 
 if not os.path.exists("batch_run_local"):
     os.mkdir("batch_run_local")
 
-for town in towns:
-    fw = open("batch_run_local/run_%s.sh" % town, "w")
-    files=[]
-    files=os.listdir("bashs_local/%s" % town)
+for i in range(8):
+    fw = open("batch_run_local/run_weather-%d.sh" % i, "w")
+    files = []
+    files = os.listdir("bashs/weather-%d" % i)
     for file in files:
-        fw.write("bash data_collection/bashs_local/%s/%s \n" % (town,file))
+        fw.write("bash data_collection/bashs/weather-%d/%s \n" % (i, file))
+
+

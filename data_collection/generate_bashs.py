@@ -91,12 +91,13 @@ def generate_script(
     return base
 
 
-for i in range(4):
+for i in range(8):
     if not os.path.exists("bashs"):
         os.mkdir("bashs")
     os.mkdir("bashs/weather-%d" % i)
+    j=i%4
     for route in routes:
-        ip, port, tm_port = ip_ports[i]
+        ip, port, tm_port = ip_ports[j]
         script = generate_script(
             ip,
             port,
