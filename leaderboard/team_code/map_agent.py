@@ -83,7 +83,9 @@ class MapAgent(BaseAgent):
         self.global_map[:, 0, ...] = road / 255.
         self.global_map[:, 1, ...] = lane / 255.
         torch.cuda.empty_cache()
-        self.global_map = torch.tensor(self.global_map, device='cuda', dtype=torch.float32)
+        self.global_map = torch.tensor(self.global_map, dtype=torch.float32)
+        self.global_map = self.global_map.to('cuda')
+        #self.global_map = torch.tensor(self.global_map, device='cuda', dtype=torch.float32)
 
         world_offset = torch.tensor(map_image._world_offset, device='cuda', dtype=torch.float32)
 
