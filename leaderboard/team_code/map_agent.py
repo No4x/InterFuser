@@ -11,7 +11,7 @@ import torch
 from utils_tf.map_utils import MapImage, PIXELS_PER_METER
 from utils_tf import lts_rendering
 import carla
-
+import gc
 class MapAgent(BaseAgent):
     def sensors(self):
         result = super().sensors()
@@ -82,10 +82,9 @@ class MapAgent(BaseAgent):
         self.global_map = np.zeros((1, 15,) + road.shape)
         self.global_map[:, 0, ...] = road / 255.
         self.global_map[:, 1, ...] = lane / 255.
+        gc.collect()
         torch.cuda.empty_cache()
-        self.global_map = torch.tensor(self.global_map, dtype=torch.float32)
-        self.global_map = self.global_map.to('cuda')
-        #self.global_map = torch.tensor(self.global_map, device='cuda', dtype=torch.float32)
+        self.global_map = torch.tensor(self.global_map, device='cuda', dtype=torch.float32)
 
         world_offset = torch.tensor(map_image._world_offset, device='cuda', dtype=torch.float32)
 
