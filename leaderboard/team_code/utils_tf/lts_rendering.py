@@ -4,7 +4,7 @@ import numpy as np
 import torch.nn.functional as F
 
 from PIL import Image
-
+import os
 
 # Global Flags
 PIXELS_PER_METER = 5
@@ -12,7 +12,9 @@ PIXELS_PER_METER = 5
 
 class Renderer():
     def __init__(self, map_offset, map_dims, data_generation=True):
-        self.args = {'device': 'cuda'}
+        cuda_device = os.environ.get('CUDA_DEVICE')
+        cuda = torch.device(f'cuda:{cuda_device}')
+        self.args = {'device': cuda}
         if data_generation:
             self.PIXELS_AHEAD_VEHICLE = 0 # ego car is central
             self.local_view_dims = (500, 500)

@@ -85,9 +85,11 @@ class MapAgent(BaseAgent):
 
         torch.cuda.empty_cache()
         cuda_device = os.environ.get('CUDA_DEVICE')
-        self.global_map = torch.tensor(self.global_map, device=f'cuda_device:{cuda_device}', dtype=torch.float32)
+        self.cuda = torch.device(f'cuda:{cuda_device}')
 
-        world_offset = torch.tensor(map_image._world_offset, device=f'cuda:{cuda_device}', dtype=torch.float32)
+        self.global_map = torch.tensor(self.global_map, device=self.cuda, dtype=torch.float32)
+
+        world_offset = torch.tensor(map_image._world_offset, device=self.cuda, dtype=torch.float32)
 
         self.map_dims = self.global_map.shape[2:4]
         self.renderer = lts_rendering.Renderer(world_offset, self.map_dims, data_generation=True)
@@ -125,8 +127,8 @@ class MapAgent(BaseAgent):
 
         # fetch local birdview per agent
         ego_pos = torch.tensor([self._vehicle.get_transform().location.x, self._vehicle.get_transform().location.y],
-                               device='cuda', dtype=torch.float32)
-        ego_yaw = torch.tensor([self._vehicle.get_transform().rotation.yaw / 180 * np.pi], device='cuda',
+                               device=self.cuda, dtype=torch.float32)
+        ego_yaw = torch.tensor([self._vehicle.get_transform().rotation.yaw / 180 * np.pi], device=self.cuda,
                                dtype=torch.float32)
         birdview = self.renderer.get_local_birdview(
             semantic_grid,
@@ -140,13 +142,13 @@ class MapAgent(BaseAgent):
             if (vehicle.get_location().distance(self._vehicle.get_location()) < self.detection_radius):
                 if (vehicle.id != self._vehicle.id):
                     pos = torch.tensor([vehicle.get_transform().location.x, vehicle.get_transform().location.y],
-                                       device='cuda', dtype=torch.float32)
-                    yaw = torch.tensor([vehicle.get_transform().rotation.yaw / 180 * np.pi], device='cuda',
+                                       device=self.cuda, dtype=torch.float32)
+                    yaw = torch.tensor([vehicle.get_transform().rotation.yaw / 180 * np.pi], device=self.cuda,
                                        dtype=torch.float32)
                     veh_x_extent = int(max(vehicle.bounding_box.extent.x * 2, 1) * PIXELS_PER_METER)
                     veh_y_extent = int(max(vehicle.bounding_box.extent.y * 2, 1) * PIXELS_PER_METER)
 
-                    self.vehicle_template = torch.ones(1, 1, veh_x_extent, veh_y_extent, device='cuda')
+                    self.vehicle_template = torch.ones(1, 1, veh_x_extent, veh_y_extent, device=self.cuda)
                     self.renderer.render_agent_bv(
                         birdview,
                         ego_pos,
@@ -177,14 +179,14 @@ class MapAgent(BaseAgent):
             template_batched.append(np.ones([20, 7]))
 
         if len(ego_pos_batched) > 0:
-            ego_pos_batched_torch = torch.tensor(ego_pos_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
-            ego_yaw_batched_torch = torch.tensor(ego_yaw_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
-            pos_batched_torch = torch.tensor(pos_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
-            yaw_batched_torch = torch.tensor(yaw_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
+            ego_pos_batched_torch = torch.tensor(ego_pos_batched, device=self.cuda, dtype=torch.float32).unsqueeze(1)
+            ego_yaw_batched_torch = torch.tensor(ego_yaw_batched, device=self.cuda, dtype=torch.float32).unsqueeze(1)
+            pos_batched_torch = torch.tensor(pos_batched, device=self.cuda, dtype=torch.float32).unsqueeze(1)
+            yaw_batched_torch = torch.tensor(yaw_batched, device=self.cuda, dtype=torch.float32).unsqueeze(1)
             # template_batched_torch = torch.tensor(template_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
             template_batched_np = np.array(template_batched)
-            template_batched_torch = torch.tensor(template_batched_np, device='cuda', dtype=torch.float32).unsqueeze(1)
-            channel_batched_torch = torch.tensor(channel_batched, device='cuda', dtype=torch.float32)
+            template_batched_torch = torch.tensor(template_batched_np, device=self.cuda, dtype=torch.float32).unsqueeze(1)
+            channel_batched_torch = torch.tensor(channel_batched, device=self.cuda, dtype=torch.float32)
 
             self.renderer.render_agent_bv_batched(
                 birdview,
@@ -226,14 +228,14 @@ class MapAgent(BaseAgent):
                 channel_batched.append(2)
 
         if len(ego_pos_batched) > 0:
-            ego_pos_batched_torch = torch.tensor(ego_pos_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
-            ego_yaw_batched_torch = torch.tensor(ego_yaw_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
-            pos_batched_torch = torch.tensor(pos_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
-            yaw_batched_torch = torch.tensor(yaw_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
+            ego_pos_batched_torch = torch.tensor(ego_pos_batched, device=self.cuda, dtype=torch.float32).unsqueeze(1)
+            ego_yaw_batched_torch = torch.tensor(ego_yaw_batched, device=self.cuda, dtype=torch.float32).unsqueeze(1)
+            pos_batched_torch = torch.tensor(pos_batched, device=self.cuda, dtype=torch.float32).unsqueeze(1)
+            yaw_batched_torch = torch.tensor(yaw_batched, device=self.cuda, dtype=torch.float32).unsqueeze(1)
             # template_batched_torch = torch.tensor(template_batched, device='cuda', dtype=torch.float32).unsqueeze(1)
             template_batched_np = np.array(template_batched)
-            template_batched_torch = torch.tensor(template_batched_np, device='cuda', dtype=torch.float32).unsqueeze(1)
-            channel_batched_torch = torch.tensor(channel_batched, device='cuda', dtype=torch.int)
+            template_batched_torch = torch.tensor(template_batched_np, device=self.cuda, dtype=torch.float32).unsqueeze(1)
+            channel_batched_torch = torch.tensor(channel_batched, device=self.cuda, dtype=torch.int)
 
             self.renderer.render_agent_bv_batched(
                 birdview,
