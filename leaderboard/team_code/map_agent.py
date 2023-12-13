@@ -83,7 +83,7 @@ class MapAgent(BaseAgent):
         self.global_map[:, 0, ...] = road / 255.
         self.global_map[:, 1, ...] = lane / 255.
 
-        torch.cuda.empty_cache()
+
         cuda_device = os.environ.get('CUDA_DEVICE')
         self.cuda = torch.device(f'cuda:{cuda_device}')
 
@@ -93,7 +93,7 @@ class MapAgent(BaseAgent):
 
         self.map_dims = self.global_map.shape[2:4]
         self.renderer = lts_rendering.Renderer(world_offset, self.map_dims, data_generation=True)
-
+        torch.cuda.empty_cache()
 
     def tick(self, input_data):
         self._actors = self._world.get_actors()
@@ -158,7 +158,7 @@ class MapAgent(BaseAgent):
                         yaw,
                         channel=5
                     )
-
+        torch.cuda.empty_cache()
         ego_pos_batched = []
         ego_yaw_batched = []
         pos_batched = []
@@ -246,7 +246,7 @@ class MapAgent(BaseAgent):
                 yaw_batched_torch,
                 channel=channel_batched_torch,
             )
-
+        torch.cuda.empty_cache()
         return birdview
 
     def get_bev_cars(self, lidar=None):
