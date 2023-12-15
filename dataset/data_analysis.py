@@ -45,6 +45,7 @@ def dataset_index(weathers):
     print(frames)
 def create_plot(path,weather):
     dict={"failed_number":[],"total_number":[],"failure_rate":[],"score_composed":[]}
+    labels=[]
     files=os.listdir(path)
     for file in files:
         with open(os.path.join(path,file),'r') as read_file:
@@ -52,34 +53,51 @@ def create_plot(path,weather):
             for key,value in data["meta"].items():
                 if key != "exceptions" :
                     if key == "scores":
-                        dict["score_composed"].append(f"{value['score_composed']:.2f}")
+                        dict["score_composed"].append(value['score_composed'])
                     elif key == "failure_rate":
                         dict[key].append(float(value.strip("%")))
                     else:
                         dict[key].append(value)
-    labels=files
+        labels.append(file.split('.')[0])
     x = np.arange(len(labels))  # the label locations
-    width = 0.6  # the width of the bars
+    width = 0.4  # the width of the bars
 
-    fig, ax = plt.subplots()
-    rects1 = ax.bar(x - width , dict['failed_number'], width/2, label='failed number')
-    rects2 = ax.bar(x - width/2 , dict['total_number'], width/2, label='total number')
-    rects3 = ax.bar(x + width/2 , dict['failure_rate'], width/2, label='failure rate')
-    rects4 = ax.bar(x + width , dict['score_composed'], width/2, label='scores')
 
+    fig, (ax,ax2) = plt.subplots(2,1,'col',figsize=(12, 8))
+    ax1 = ax.twinx()
+    rects1 = ax.bar(x - width/2 , dict['failed_number'], width, label='failed number')
+    rects2 = ax.bar(x + width/2 , dict['total_number'], width, label='total number')
+    # rects3 = ax.bar(x + width/2 , dict['failure_rate'], width/2, label='failure rate')
+    # rects4 = ax.bar(x + width , dict['score_composed'], width/2, label='scores')
+    line1 = ax1.plot(x, dict['failure_rate'], color='red', marker='x', label='Failure Rate', linestyle='dashed')
+    rects3 = ax2.bar(x, dict['score_composed'], width, label='scores',color='purple')
     # Add some text for labels, title and custom x-axis tick labels, etc.
     ax.set_ylabel('values')
+    ax1.set_ylabel('Failure Rate (%)', color='red')
+    ax2.set_ylabel('scores')
     ax.set_title('Statistic')
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45, ha="right")  # Rotate labels for better readability
-    ax.legend()
-    plt.tight_layout()
-    ax.tick_params(axis='x', labelsize=8)
-    values_str = [str(val) for val in dict.values()]
+    #ax.set_xticklabels(labels, rotation=45, ha="right")  # Rotate labels for better readability
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels, rotation=45, ha="right")
+    ax.legend(loc='upper left')
+    ax1.legend(loc='upper right')
+    ax2.legend(loc='upper left')
+    for rect, value in zip(rects1 + rects2, dict['failed_number'] + dict['total_number']):
+        height = rect.get_height()
+        ax.text(rect.get_x() + rect.get_width() / 2., height, f'{value}', ha='center', va='bottom',fontsize=8)
+    for i, rect in enumerate(rects3):
+        height = rect.get_height()
+        ax2.text(rect.get_x() + rect.get_width() / 2., height, f'{dict["score_composed"][i]:.2f}', ha='center',
+                 va='bottom')
 
+    for i, txt in enumerate(dict['failure_rate']):
+        ax1.annotate(f'{txt:.2f}', (x[i], txt), textcoords="offset points", xytext=(0, 5), ha='left', fontsize=8)
+
+    #plt.tight_layout()
+    ax.tick_params(axis='x', labelsize=8)
     #plt.show()
-    save_path=os.path.join(weather,"static/figures")
-    os.makedirs(save_path,exist_ok=True)
+    save_path=os.path.join(weather,f"static/{weather}.png")
     plt.savefig(save_path)
     plt.close()
 
