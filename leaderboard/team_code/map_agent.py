@@ -114,7 +114,7 @@ class MapAgent(BaseAgent):
         result = super().tick(input_data)
         result["topdown"] = topdown
         result['topdown_tf'] = self.render_BEV()
-
+        torch.cuda.empty_cache()
         result['cars']=cars
         return result
 
