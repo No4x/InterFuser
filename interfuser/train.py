@@ -1841,4 +1841,8 @@ def validate(
 
 
 if __name__ == "__main__":
+    starttime = datetime.now()
+
     main()
+    endtime = datetime.now()
+    print(f"time cost{endtime - starttime}")

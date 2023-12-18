@@ -1,5 +1,5 @@
-GPU_NUM=8
-DATASET_ROOT='dataset/'
+GPU_NUM=4
+DATASET_ROOT='../dataset/'
 
 ./distributed_train.sh $GPU_NUM $DATASET_ROOT  --dataset carla --train-towns 1 2 3 4 6 7 10  --val-towns 5 \
     --train-weathers 0 1 2 3 4 5 6 7 8 9  --val-weathers 10 11 12 13 \
@@ -9,4 +9,5 @@ DATASET_ROOT='dataset/'
     --with-backbone-lr --backbone-lr 0.0002 \
     --multi-view --with-lidar --multi-view-input-size 3 128 128 \
     --experiment interfuser_baseline \
+    --output ../model \
     --pretrained
