@@ -3,6 +3,9 @@ import json
 import shutil
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
+from multiprocessing import Pool
+from tqdm import tqdm
 def analyse_data(weathers):
 
     for weather in weathers:
@@ -112,19 +115,71 @@ def create_plot(path,weather):
     plt.savefig(save_path)
     plt.close()
 
-def count(file):
-    with open(file,'r') as f:
+def resize_image(args):
+    input_path, output_path, target_size = args
+    try:
+        # Open the image file
+        with Image.open(input_path) as img:
+            # Resize the image
+            resized_img = img.resize(target_size, Image.ANTIALIAS)
+            # Save the resized image
+            if not os.path.exists(output_path) or os.path.getsize(output_path)/1024 < 10:
+                with open('../resize_result.txt','a') as f:
+                    f.write(f"{output_path},'\n'")
+                    print('Resizing','output_path',output_path)
+                resized_img.save(output_path, format='PNG')
+    except Exception as e:
+        print(f"Error processing image {input_path}: {e}")
 
-        cnt=0
-        lines = f.readlines()
-        for line in lines:
-            if "weather-2" in line:
-                cnt+=1
-        print(cnt)
+def resize_images_in_directory(args):
+    input_dir, output_dir, target_size = args
+    os.makedirs(output_dir, exist_ok=True)
+
+    args_list = []
+    for filename in os.listdir(input_dir):
+        input_path = os.path.join(input_dir, filename)
+        output_path = os.path.join(output_dir, filename)
+
+        if os.path.isfile(input_path):
+            args_list.append((input_path, output_path, target_size))
+
+    with Pool(24) as p:
+        list(tqdm(p.imap(resize_image, args_list), desc=output_path,total=len(args_list)))
+def copy_directory(args):
+    source_dir, destination_dir=args
+    try:
+        # 使用 shutil.copytree 复制整个目录
+        shutil.copytree(source_dir, destination_dir)
+        print(f"sucess：{source_dir} to {destination_dir}")
+    except Exception as e:
+        print(f"falied：{e}")
+
+
+
 if __name__=="__main__":
     weathers=["weather-0","weather-1","weather-2","weather-3"]
-    analyse_data(weathers)
+    #analyse_data(weathers)
     for weather in weathers:
-        create_plot(os.path.join(weather, "static/json"), weather)
+        # create_plot(os.path.join(weather, "static/json"), weather)
+        dirs=os.listdir(os.path.join(weather,'data'))
+        args_list=[]
+        for dir in dirs:
+            path=os.path.join(weather,'data',dir)
+            source_dirs=path
+            destination_dirs=f"../dataset_re/{path}"
+            args_list.append((source_dirs, destination_dirs))
+        #with Pool(24) as pool:
+            #list(tqdm(pool.imap(copy_directory,args_list),desc=destination_dirs, total=len(args_list)))
+            resize_images_in_directory((os.path.join(path, 'rgb_tf'), os.path.join(path, 'rgb_tf_resized'), (960, 160)))
+
+
+            # files=os.listdir(os.path.join(path,'rgb_tf'))
+            # for file in files:
+            #     with Pool(24) as p:
+            #         input=os.path.join(path,'rgb_tf',file)
+            #         output=os.path.join(path,f'rgb_tf_resized/{file}')
+            #         target_size=(960,160)
+            #         r = list(tqdm(p.map(resize_image, ((input,output,target_size))), total=len(files)))
+                #resize_image(os.path.join(path,'rgb_tf',file),os.path.join(path,f'rgb_tf_resized/{file}'),(960,160))
     #dataset_index(weathers)
     #count("dataset_index.txt")
