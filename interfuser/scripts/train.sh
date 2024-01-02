@@ -9,5 +9,5 @@ DATASET_ROOT='../dataset/'
     --with-backbone-lr --backbone-lr 0.0002 \
     --multi-view --with-lidar --multi-view-input-size 3 128 128 \
     --experiment interfuser_baseline \
-    --output ../model \
-    --pretrained
+    --pretrained \
+    --output ../models

@@ -35,7 +35,7 @@ except ImportError:
 SAVE_PATH = os.environ.get("SAVE_PATH", 'eval')
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
-
+os.environ["SDL_VIDEODRIVER"] = "dummy"
 
 class DisplayInterface(object):
     def __init__(self):
@@ -157,7 +157,7 @@ def create_carla_rgb_transform(
 
 
 class InterfuserAgent(autonomous_agent.AutonomousAgent):
-    def setup(self, path_to_conf_file):
+    def setup(self, path_to_conf_file,route_index=None):
 
         self._hic = DisplayInterface()
         self.lidar_processed = list()
@@ -169,6 +169,8 @@ class InterfuserAgent(autonomous_agent.AutonomousAgent):
         self.rgb_left_transform = create_carla_rgb_transform(128)
         self.rgb_right_transform = create_carla_rgb_transform(128)
         self.rgb_center_transform = create_carla_rgb_transform(128, need_scale=False)
+
+        self.route_index = route_index
 
         self.tracker = Tracker()
 
@@ -218,6 +220,7 @@ class InterfuserAgent(autonomous_agent.AutonomousAgent):
         if SAVE_PATH is not None:
             now = datetime.datetime.now()
             string = pathlib.Path(os.environ["ROUTES"]).stem + "_"
+            string += f'route{self.route_index%2}_'
             string += "_".join(
                 map(
                     lambda x: "%02d" % x,
@@ -583,6 +586,8 @@ class InterfuserAgent(autonomous_agent.AutonomousAgent):
         Image.fromarray(tick_data["surface"]).save(
             self.save_path / "meta" / ("%04d.jpg" % frame)
         )
+
+
         return
 
     def destroy(self):
