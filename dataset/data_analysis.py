@@ -154,23 +154,42 @@ def copy_directory(args):
     except Exception as e:
         print(f"falied：{e}")
 
+def caculate_aver_score(file):
+
+    score1=0
+    score2=0
+    with open(file,'r') as f:
+        jess_dict = json.loads(f.read())
+
+    for i in range(len(jess_dict["_checkpoint"]["records"])):
+        if i %2 ==0:
+            score1+=jess_dict["_checkpoint"]["records"][i]["scores"]["score_composed"]
+        else:
+            score2 += jess_dict["_checkpoint"]["records"][i]["scores"]["score_composed"]
+
+
+    avg1=score1/jess_dict["_checkpoint"]["progress"][0] *2
+    avg2=score2/jess_dict["_checkpoint"]["progress"][0] *2
+
+    print(f"avg1: {avg1}, avg2: {avg2}")
+
 
 
 if __name__=="__main__":
     weathers=["weather-0","weather-1","weather-2","weather-3"]
     #analyse_data(weathers)
-    for weather in weathers:
+    # for weather in weathers:
         # create_plot(os.path.join(weather, "static/json"), weather)
-        dirs=os.listdir(os.path.join(weather,'data'))
-        args_list=[]
-        for dir in dirs:
-            path=os.path.join(weather,'data',dir)
-            source_dirs=path
-            destination_dirs=f"../dataset_re/{path}"
-            args_list.append((source_dirs, destination_dirs))
+        # dirs=os.listdir(os.path.join(weather,'data'))
+        # args_list=[]
+        # for dir in dirs:
+        #     path=os.path.join(weather,'data',dir)
+        #     source_dirs=path
+        #     destination_dirs=f"../dataset_re/{path}"
+        #     args_list.append((source_dirs, destination_dirs))
         #with Pool(24) as pool:
             #list(tqdm(pool.imap(copy_directory,args_list),desc=destination_dirs, total=len(args_list)))
-            resize_images_in_directory((os.path.join(path, 'rgb_tf'), os.path.join(path, 'rgb_tf_resized'), (960, 160)))
+            # resize_images_in_directory((os.path.join(path, 'rgb_tf'), os.path.join(path, 'rgb_tf_resized'), (960, 160)))
 
 
             # files=os.listdir(os.path.join(path,'rgb_tf'))
@@ -183,3 +202,4 @@ if __name__=="__main__":
                 #resize_image(os.path.join(path,'rgb_tf',file),os.path.join(path,f'rgb_tf_resized/{file}'),(960,160))
     #dataset_index(weathers)
     #count("dataset_index.txt")
+    caculate_aver_score('results/interfuser_longst6_1.json')

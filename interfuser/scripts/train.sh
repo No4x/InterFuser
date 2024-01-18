@@ -1,5 +1,5 @@
 GPU_NUM=4
-DATASET_ROOT='../dataset/'
+DATASET_ROOT='/beegfs/data/shared/interfuser/dataset'
 
 ./distributed_train.sh $GPU_NUM $DATASET_ROOT  --dataset carla --train-towns 1 2 3 4 6 7 10  --val-towns 5 \
     --train-weathers 0 1 2 3 4 5 6 7 8 9  --val-weathers 10 11 12 13 \
