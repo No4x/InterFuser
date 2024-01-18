@@ -123,10 +123,7 @@ def resize_image(args):
             # Resize the image
             resized_img = img.resize(target_size, Image.ANTIALIAS)
             # Save the resized image
-            if not os.path.exists(output_path) or os.path.getsize(output_path)/1024 < 10:
-                with open('../resize_result.txt','a') as f:
-                    f.write(f"{output_path},'\n'")
-                    print('Resizing','output_path',output_path)
+            if os.path.isfile(output_path) != True:
                 resized_img.save(output_path, format='PNG')
     except Exception as e:
         print(f"Error processing image {input_path}: {e}")
@@ -154,26 +151,52 @@ def copy_directory(args):
     except Exception as e:
         print(f"falied：{e}")
 
+def find_lack_files():
+    with open("dataset_index1.txt","r") as rf:
+        lines=rf.readlines()
+        lines.sort()
+        for line in lines:
+            route=line.split(" ")[0]
+            frames=int(line.split(" ")[2])
+            if (os.path.exists(route) ==False)  or (len(os.listdir(os.path.join(route,"lidar")))!=frames):
+
+                with open("lack_files.txt", "a") as f:
+                    if not os.path.exists(route):
+                        str=f"{route} \n"
+                    else:
+                        str = f"{route}  {len(os.listdir((os.path.join(route,'lidar'))))} {frames}\n"
+                    f.write(str)
+
 def caculate_aver_score(file):
 
-    score1=0
-    score2=0
+    ds1=0
+    ds2=0
+    rc1=0
+    rc2=0
+    if1=0
+    if2=0
     with open(file,'r') as f:
         jess_dict = json.loads(f.read())
 
     for i in range(len(jess_dict["_checkpoint"]["records"])):
         if i %2 ==0:
-            score1+=jess_dict["_checkpoint"]["records"][i]["scores"]["score_composed"]
+            ds1+=jess_dict["_checkpoint"]["records"][i]["scores"]["score_composed"]
+            rc1+=jess_dict["_checkpoint"]["records"][i]["scores"]["score_route"]
+            if1+=jess_dict["_checkpoint"]["records"][i]["scores"]["score_penalty"]
         else:
-            score2 += jess_dict["_checkpoint"]["records"][i]["scores"]["score_composed"]
+            ds2 += jess_dict["_checkpoint"]["records"][i]["scores"]["score_composed"]
+            rc2 += jess_dict["_checkpoint"]["records"][i]["scores"]["score_route"]
+            if2 += jess_dict["_checkpoint"]["records"][i]["scores"]["score_penalty"]
 
 
-    avg1=score1/jess_dict["_checkpoint"]["progress"][0] *2
-    avg2=score2/jess_dict["_checkpoint"]["progress"][0] *2
+    avg_ds1=ds1/jess_dict["_checkpoint"]["progress"][0] *2
+    avg_ds2=ds2/jess_dict["_checkpoint"]["progress"][0] *2
+    avg_rc1 = rc1 / jess_dict["_checkpoint"]["progress"][0] * 2
+    avg_rc2 = rc2 / jess_dict["_checkpoint"]["progress"][0] * 2
+    avg_if1 = if1 / jess_dict["_checkpoint"]["progress"][0] * 2
+    avg_if2 = if2 / jess_dict["_checkpoint"]["progress"][0] * 2
 
-    print(f"avg1: {avg1}, avg2: {avg2}")
-
-
+    print(f"avg_ds1: {avg_ds1}, avg_ds2: {avg_ds2},avg_rc1: {avg_rc1}, avg_rc2: {avg_rc2},avg_if1: {avg_if1}, avg_if2: {avg_if2}")
 
 if __name__=="__main__":
     weathers=["weather-0","weather-1","weather-2","weather-3"]
@@ -184,6 +207,8 @@ if __name__=="__main__":
         # args_list=[]
         # for dir in dirs:
         #     path=os.path.join(weather,'data',dir)
+    #find_lack_files()
+            #files=os.listdir(path)
         #     source_dirs=path
         #     destination_dirs=f"../dataset_re/{path}"
         #     args_list.append((source_dirs, destination_dirs))
@@ -202,4 +227,4 @@ if __name__=="__main__":
                 #resize_image(os.path.join(path,'rgb_tf',file),os.path.join(path,f'rgb_tf_resized/{file}'),(960,160))
     #dataset_index(weathers)
     #count("dataset_index.txt")
-    caculate_aver_score('results/interfuser_longst6_1.json')
+    caculate_aver_score('results/interfuser_result1.json')
