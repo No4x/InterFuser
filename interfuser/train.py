@@ -870,6 +870,7 @@ def main():
     args.distributed = False
     if "WORLD_SIZE" in os.environ:
         args.distributed = int(os.environ["WORLD_SIZE"]) > 1
+
     args.device = "cuda:0"
     args.world_size = 1
     args.rank = 0  # global rank
@@ -968,7 +969,8 @@ def main():
         model = torch.jit.script(model)
 
     linear_scaled_lr = (
-        args.lr * args.batch_size * torch.distributed.get_world_size() / 512.0
+        #args.lr * args.batch_size * torch.distributed.get_world_size() / 512.0 #setting for one gpu
+        args.lr * args.batch_size * 1 / 512.0
     )
     args.lr = linear_scaled_lr
     if args.with_backbone_lr:
@@ -979,7 +981,8 @@ def main():
         backbone_linear_scaled_lr = (
             args.backbone_lr
             * args.batch_size
-            * torch.distributed.get_world_size()
+            #* torch.distributed.get_world_size()
+            *1
             / 512.0
         )
         backbone_weights = []
